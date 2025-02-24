@@ -266,13 +266,16 @@ def calculate_norm_error(coeffs_list, coeffs_sys):
 ### Plots the evolution of our delta error and the error we are using to obtain the best estimate for coefficients
 ### Also marks the indices where we compute controller coefficients. 
 def plot_error_comparison(all_coeffs_list_RLS, all_coeffs_list_ARM, coeffs_sys, 
-                          used_index_RLS, used_index_ARM, norm_list_RLS, norm_list_ARM, xrange, b_type, save_data):
+                          used_index_RLS, used_index_ARM, norm_list_RLS, norm_list_ARM, xrange, b_type, save_data, normalized_signal):
     
     dif_list, _ = calculate_norm_error(all_coeffs_list_RLS, coeffs_sys)
     dif_list_arm, _ = calculate_norm_error(all_coeffs_list_ARM, coeffs_sys)
 
     used_rls = [dif_list[i] for i in used_index_RLS]
-    used_arm = [dif_list_arm[i] for i in used_index_ARM]
+    if normalized_signal == True:
+        used_arm = [dif_list_arm[i] for i in [i - 3 for i in used_index_ARM]]
+    else:
+        used_arm = [dif_list_arm[i] for i in used_index_ARM]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(12, 6))
 
@@ -287,13 +290,19 @@ def plot_error_comparison(all_coeffs_list_RLS, all_coeffs_list_ARM, coeffs_sys,
 
     # Bottom subplot (ARM-related plots)
     ax2.semilogy(dif_list_arm[:xrange], label='True Error ARM$(\infty)$')
-    ax2.semilogy(norm_list_ARM[:xrange], label='Computed Error Norm ARM$(\infty)$')
+    if normalized_signal == True:
+        ax2.semilogy(norm_list_ARM[3:253], label='Computed Error Norm ARM$(\infty)$')
+    else:
+        ax2.semilogy(norm_list_ARM[:xrange], label='Computed Error Norm ARM$(\infty)$')
     ax2.set_xlabel('Timestep')
     ax2.set_title('ARM$(\infty)$: True Error and Computed Error')
-    ax2.scatter(used_index_ARM, used_arm, color='red', label='Controller Computed ARM$(\infty)$')
+    if normalized_signal == True:
+        ax2.scatter([i - 3 for i in used_index_ARM], used_arm, color='red', label='Controller Computed ARM$(\infty)$')
+    else:
+        ax2.scatter(used_index_ARM, used_arm, color='red', label='Controller Computed ARM$(\infty)$')
+    
     ax2.grid(True)
     ax2.legend()
-
     plt.tight_layout()
     if save_data: plt.savefig(f"data/{b_type}/1-norm_error_comp-{b_type}.pdf", bbox_inches="tight")
     else: plt.show()

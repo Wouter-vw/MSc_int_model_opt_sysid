@@ -170,4 +170,4 @@ else: plt.show()
 
 
 plot_error_comparison(all_coeffs_list_RLS, all_coeffs_list_ARM, coeffs_sys, 
-                          used_index_RLS, used_index_ARM, norm_list_RLS, norm_list_ARM, 250, b_type, save_data)
+                          used_index_RLS, used_index_ARM, norm_list_RLS, norm_list_ARM, 250, b_type, save_data, normalized_signal)
