@@ -2,42 +2,11 @@ import numpy as np
 from tools import control_design
 from tvopt import costs, sets
 import matplotlib.pyplot as plt
-
-## This is the function that performs RLS for given k
-def RLS_func(b_hat, P, f_factor, k, b, order):
-    # Form the regressor vector with the order which is given at k given
-    h_k = np.array([b[:, k - i - 1] for i in range(order)])
-    
-    # Compute the error: e_k = b_k - h_k^T b_hat
-    e_k_bef = b[:, k].reshape((len(b),1)) + h_k.T @ b_hat  
-
-    ### Reset the P matrix to preserve stability (This must be done sometimes as the signal may not excite RLS enough!
-    if np.linalg.norm(P) > 1e16:
-        P = np.eye(order) * 1 
-    
-    # Update RLS gain (In the case that we encounter a singular matrix we try a potential more stable calculation, in practice has not be activated. 
-    try:
-        K_k = P @ h_k @ np.linalg.inv(np.eye(len(b)) * f_factor + h_k.T @ P @ h_k)
-    except np.linalg.LinAlgError:
-        print("Error: Singular matrix encountered.")
-        K_k = P @ h_k @ np.linalg.inv(np.eye(len(b)) + h_k.T @ P @ h_k)
-
-    # Update parameter estimate
-    b_hat = b_hat - K_k @ e_k_bef
-    
-    # Calculate the error after update
-    e_k = b[:, k].reshape((len(b),1)) + h_k.T @ b_hat  
-    
-    # Take error norm 
-    e_k_norm = np.linalg.norm(e_k,ord=1)
-    
-    # Update covariance matrix
-    P = (P - (K_k @ h_k.T @ P)) / f_factor
-    return b_hat, P, e_k_norm
-
+from SYSID import RLS_func, calculate_norm_error
+from windowed_funcs import window_error
 
 # Online gradient with built in RLS
-def online_gradient_control_sys_id(f, b, lambda_lims, order, f_factor, step, x_0=0):
+def online_gradient_control_sys_id(f, b, lambda_lims, order, f_factor, step, different_systems, x_0=0):
     ## Initialize needed values
     ## A lot of variables initialized here, the last lists are used for better tracking of solution evolution
     x = np.zeros(f.dom.shape + (f.time.num_samples+1,))
@@ -63,8 +32,7 @@ def online_gradient_control_sys_id(f, b, lambda_lims, order, f_factor, step, x_0
 
         ## Calculate error at the beginning and add it to current K error
         ## By adding the error of the RLS and the error at a given point best generalization results are seen!
-        e_k_init = b[:, order+1].reshape((len(b),1)) + np.array([b[:, order - i] for i in range(order)]).T @ b_hat
-        e_k_norm = np.linalg.norm(e_k_init, ord=1) + e_k_RLS
+        e_k_norm = window_error(b_hat, e_k_RLS, b, k, order, 15)    
         norm_list.append(e_k_norm)
         
         ### If are norm improves we want to keep the computed coefficients
@@ -73,6 +41,9 @@ def online_gradient_control_sys_id(f, b, lambda_lims, order, f_factor, step, x_0
             b_hat_best = b_hat
             k_best = k
 
+        if threshold_reached == True and e_k_norm > 1e-1:
+            e_k_norm_best = 1e3
+            
         #### If there has been no improvements since 5 time steps ago, we assume a more or less stable solution
         ### We then trigger our control based algorithm to act on this system estimate. 
         ### Moreover this prevents us from having to recalculate often
@@ -109,7 +80,7 @@ def online_gradient_control_sys_id(f, b, lambda_lims, order, f_factor, step, x_0
     return x, test_coeffs, all_coeffs_list, used_index, norm_list
 
 # Online gradient with compensation, designed using control theory
-def online_gradient_control_sys_id_ARM(f, b, lambda_lims, delta, f_factor, normalized_signal, step, x_0=0):
+def online_gradient_control_sys_id_ARM(f, b, lambda_lims, delta, f_factor, step, x_0=0):
     
     ## Initialize needed values (More than just RLS due to added complexity)
     x = np.zeros(f.dom.shape + (f.time.num_samples+1,))
@@ -117,9 +88,9 @@ def online_gradient_control_sys_id_ARM(f, b, lambda_lims, delta, f_factor, norma
     order = 1
     dim = 0
     maxy = int(np.log(f.time.num_samples)**(1 + delta))
-    c = np.ones(order)
     y = [np.zeros(f.dom.shape) for _ in range(order)]
     b_hat = np.ones((order,1))
+    b_hat_best = np.ones((order,1))
     e_k_norm_best = 1e3
     e_k_RLS = 1e3
     e_k_init = np.ones_like(b[:,0])*1e3
@@ -134,6 +105,9 @@ def online_gradient_control_sys_id_ARM(f, b, lambda_lims, delta, f_factor, norma
     used_index = []
     threshold_reached = False
     norm_list = []
+    best_err_list = []
+    offset = 0
+
     
     for k in range(f.time.num_samples):
         ## Here we grow the order based on log(k)^(1+delta)
@@ -143,7 +117,7 @@ def online_gradient_control_sys_id_ARM(f, b, lambda_lims, delta, f_factor, norma
             if k <= 3:
                 raise ValueError("k must be greater than 0")
             
-            growth = np.log(k)**(1 + delta)
+            growth = np.log(k - offset)**(1 + delta)
             if np.isinf(growth):
                 raise OverflowError("Growth value is too large")
             order = int(growth)
@@ -157,37 +131,38 @@ def online_gradient_control_sys_id_ARM(f, b, lambda_lims, delta, f_factor, norma
             P = np.pad(P, ((0, 1), (0, 1)), mode='constant', constant_values=0)
             P[-1, -1] = 1
 
-    ## If we want a normalized signal, for example if we have unbounded growth, set flag as true    
-        if normalized_signal == True:     
-            if k > 2:
-                ## Run RLS on our normalized signal and append to history list. Also calculate our initial error
-                ## By adding the error of the RLS and the error at a given point best generalization results are seen!
-                b_normed = (b[:,:k]  - np.mean(b[:,:k], axis = 1, keepdims=True))/np.max(b[:,:k], axis = 1, keepdims=True)
-                b_hat, P, e_k_RLS = RLS_func(b_hat, P, f_factor, k-2, b_normed, order)
-                all_coeffs_list.append(np.append(b_hat[::-1], 1.0))
-                e_k_init = b_normed[:, order+1].reshape((len(b),1)) + np.array([b_normed[:, order - i] for i in range(order)]).T @ b_hat
-        else:
-                ## Run RLS and append to history list. Also calculate our initial error
-                ## By adding the error of the RLS and the error at a given point best generalization results are seen!
-                b_hat, P, e_k_RLS = RLS_func(b_hat, P, f_factor, k, b, order)
-                all_coeffs_list.append(np.append(b_hat[::-1], 1.0))
-                e_k_init = b[:, order+1].reshape((len(b),1)) + np.array([b[:, order - i] for i in range(order)]).T @ b_hat
+        ## Run RLS and append to history list. Also calculate our initial error
+        ## By adding the error of the RLS and the error at a given point best generalization results are seen!
+        b_hat, P, e_k_RLS = RLS_func(b_hat, P, f_factor, k, b, order)
+        all_coeffs_list.append(np.append(b_hat[::-1], 1.0))
+        e_k_norm = window_error(b_hat, e_k_RLS, b, k, order, win_size=15)
         
         ## compute the new norm and add to history list
-        e_k_norm = np.linalg.norm(e_k_init, ord=1) + e_k_RLS
         norm_list.append(e_k_norm)
-    
         ### If are norm improves we want to keep the computed coefficients
         ### We also calculate ahead to see if the order will grow within the next 5 timesteps
         if e_k_norm < e_k_norm_best and order != 1:
             e_k_norm_best = e_k_norm
             b_hat_best = b_hat
             k_best = k
-            order_k_best_5 = int(np.log(k_best + 5) ** (1 + delta))
+            best_order = order
+            order_k_best_5 = int(np.log(k_best - offset + 5) ** (1 + delta))
         
+        if threshold_reached == True and window_error(b_hat_best, 0, b, k, best_order, win_size=15) > window_error(b_hat_best, 0, b, k-1, best_order, win_size=15) * 1e8:      
+            print(f"Reset sys id at {k}")
+            threshold_reached = False
+            order = 1
+            dim = 0
+            y = [np.zeros(f.dom.shape) for _ in range(order)]
+            b_hat = np.ones((order,1))
+            e_k_norm_best = 1e-2
+            P = np.eye(order) * 1
+            c = np.ones(order+1)
+            offset = k - 3
+            
         ### if we have improved our error and we haven't had an improvement in the past fivetime steps, or 
         ### the order will grow within the next five timesteps, compute our estimated coefficients
-        if k_best is not None and (k == k_best + 5 or order != order_k_best_5) and order > 1:    
+        if k_best is not None and (k == k_best + 5 or best_order != order_k_best_5) and order > 1:
             threshold_reached = True
             test_coeffs = np.append(b_hat_best[::-1], 1.0)  # Reverse and append 1.0
     
@@ -225,53 +200,27 @@ def online_gradient_control_sys_id_ARM(f, b, lambda_lims, delta, f_factor, norma
     print(f"The minimum error norm is {e_k_norm_best}")
     return x, test_coeffs, all_coeffs_list, used_index, norm_list
 
-## Function to calculate our delta error (Described in the paper for inexact model limit)
-def calculate_norm_error(coeffs_list, coeffs_sys):
-    ### Initialize empty list
-    dif_list = []
-    ## Fist is the case that our inputted coefficients are a list of arrays
-    ## Deal with if the coefficient orders are different by appending zeros to whatever list is smaller,
-    ## Then subtract the coefficients and compute the infinity norm
-    if type(coeffs_list[0]) == np.ndarray:
-        for x in coeffs_list:
-            if len(coeffs_sys) > len(x):
-                dif = (len(coeffs_sys) - len(x))
-                delta_error = np.linalg.norm(coeffs_sys - np.append(x, np.zeros(dif)), ord=np.inf)
-                differs = True
-            elif len(coeffs_sys) < len(x):
-                dif = len(x) - len(coeffs_sys)                            
-                delta_error = np.linalg.norm(x - np.append(coeffs_sys, np.zeros(dif)), ord=np.inf)
-                differs = True
-            else:
-                delta_error = np.linalg.norm(coeffs_sys - x, ord=np.inf)
-                differs = False
-        
-            dif_list.append(delta_error)
-    ## Second case if it is just one coefficient array
-    else:
-        if len(coeffs_sys) > len(coeffs_list):
-            dif = (len(coeffs_sys) - len(coeffs_list))
-            delta_error = np.linalg.norm(coeffs_sys - np.append(coeffs_list, np.zeros(dif)), ord=np.inf)
-            differs = True
-        elif len(coeffs_sys) < len(coeffs_list):
-            dif = len(coeffs_list) - len(coeffs_sys)                            
-            delta_error = np.linalg.norm(coeffs_list - np.append(coeffs_sys, np.zeros(dif)), ord=np.inf)
-            differs = True
-        else:
-            delta_error = np.linalg.norm(coeffs_sys - coeffs_list, ord=np.inf)
-            differs = False
-        dif_list.append(delta_error)
-    return dif_list, differs
-
 ### Plots the evolution of our delta error and the error we are using to obtain the best estimate for coefficients
 ### Also marks the indices where we compute controller coefficients. 
 def plot_error_comparison(all_coeffs_list_RLS, all_coeffs_list_ARM, coeffs_sys, 
-                          used_index_RLS, used_index_ARM, norm_list_RLS, norm_list_ARM, xrange, b_type, save_data, normalized_signal):
-    
-    dif_list, _ = calculate_norm_error(all_coeffs_list_RLS, coeffs_sys)
-    dif_list_arm, _ = calculate_norm_error(all_coeffs_list_ARM, coeffs_sys)
+                          used_index_RLS, used_index_ARM, norm_list_RLS, norm_list_ARM, xrange, b_type, save_data, normalized_signal, secondsys = [0,0]):
+
+    if secondsys[0] != 0:
+        dif_list, _ = calculate_norm_error(all_coeffs_list_RLS[0:999], coeffs_sys)
+        list2, _ = calculate_norm_error(all_coeffs_list_RLS[1000:1999], secondsys)
+        dif_list.extend(list2)
+    else:
+        dif_list, _ = calculate_norm_error(all_coeffs_list_RLS, coeffs_sys)
+
+    if secondsys[0] != 0:
+        dif_list_arm, _ = calculate_norm_error(all_coeffs_list_ARM[0:999], coeffs_sys)
+        list2_arm, _ = calculate_norm_error(all_coeffs_list_ARM[1000:1999], secondsys)
+        dif_list_arm.extend(list2_arm)
+    else:
+        dif_list_arm, _ = calculate_norm_error(all_coeffs_list_ARM, coeffs_sys)
 
     used_rls = [dif_list[i] for i in used_index_RLS]
+    
     if normalized_signal == True:
         used_arm = [dif_list_arm[i] for i in [i - 3 for i in used_index_ARM]]
     else:
@@ -280,11 +229,11 @@ def plot_error_comparison(all_coeffs_list_RLS, all_coeffs_list_ARM, coeffs_sys,
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(12, 6))
 
     # Top subplot (RLS-related plots)
-    ax1.semilogy(dif_list[:xrange], label='True Error RLS')
-    ax1.semilogy(norm_list_RLS[:xrange], label='Computed Error Norm RLS')
+    ax1.semilogy(dif_list[:xrange], label='True Error RLS', zorder=1)
+    ax1.semilogy(norm_list_RLS[:xrange], label='Computed Error Norm RLS', zorder=2)
     ax1.set_ylabel(r'$\||(\cdot)||_\infty$')
     ax1.set_title('RLS: True Error and Computed Error')
-    ax1.scatter(used_index_RLS, used_rls, color='red', label='Controller Computed ARM$(\infty)$')
+    ax1.scatter(used_index_RLS, used_rls, color='red', label='Controller Computed ARM$(\infty)$', zorder=3)
     ax1.grid(True)
     ax1.legend()
 
@@ -304,5 +253,16 @@ def plot_error_comparison(all_coeffs_list_RLS, all_coeffs_list_ARM, coeffs_sys,
     ax2.grid(True)
     ax2.legend()
     plt.tight_layout()
-    if save_data: plt.savefig(f"data/{b_type}/1-norm_error_comp-{b_type}.pdf", bbox_inches="tight")
+    if save_data: plt.savefig(f"data/changing_signal/{b_type}/1-norm_error_comp-{b_type}.pdf", bbox_inches="tight")
     else: plt.show()
+
+def window_error(b_hat, e_k_RLS, b, k, order, win_size):
+    if k <= win_size:
+        return 100  # No computation if k is within window size
+
+    else: 
+        win_err = e_k_RLS + sum(np.linalg.norm(
+        b[:, k].reshape((len(b), 1)) + np.array([b[:, k - i - 1] for i in range(order)]).T @ b_hat,
+        ord=1) for k in range(k - 1, k - win_size, -1))
+
+    return win_err
