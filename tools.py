@@ -83,7 +83,7 @@ def online_gradient_control(problem, c, x_0=0):
         e = - f.gradient(x[...,k], k*f.time.t_s)
                 
         y = y[1:] + [-sum([b[i]*y[i]/b[m] for i in range(m)]) + e/b[m]]
-        
+
         x[...,k+1] = sum([c[i]*y[i] for i in range(m)])
         
     return x
