@@ -28,7 +28,7 @@ from tools import TVQuadratic, online_gradient, online_gradient_control, control
 
 
 #%% SET-UP
-save_data = False
+save_data = True
 
 n = 15 # size of the unknown
 
@@ -58,7 +58,7 @@ x0 = 50*ran.normal(size=(n,1))
 
 #%% CHOOSE b_k
 
-b_type = "sine_incorrect_B_D" # "ramp" "sine" "sine+ramp" "sine^2"
+b_type = "sine" # "ramp" "sine" "sine+ramp" "sine^2"
 
 if b_type == "constant":
     different_systems = False
@@ -191,10 +191,9 @@ error_control_sys_id_ARM = [la.norm(x[...,k]-x_opt[:,[k]]) for k in range(num_sa
 # ------ save data ------
 if save_data:
     
-    np.savez(f"data/1-tv_linear_term-{b_type}.npz", t_s=t_s, t_max=t_max, num_samples=num_samples,
+    np.savez(f"data/hessian_change/1-tv_linear_term-{b_type}.npz", t_s=t_s, t_max=t_max, num_samples=num_samples,
              n=n, mu=mu, L=L, step=step, x0=x0, b_type=b_type,
              coeffs_sys=coeffs_sys, error_gradient=error_gradient, error_control=error_control, 
-             error_control_sys_id = error_control_sys_id, delta_error_rls = delta_error_rls,
              error_control_sys_id_ARM = error_control_sys_id_ARM, delta_error_ARM = delta_error_ARM)
 
 
@@ -220,5 +219,5 @@ plt.ylabel("Tracking error", fontsize=fontsize)
 plt.legend(fontsize=fontsize-2)
 plt.title(rf"Online Optimization with $\boldsymbol{{b}}_{{k}}$ = {b_type}")
 
-if save_data: plt.savefig(f"data/1-error_comparison-{b_type}.pdf", bbox_inches="tight")
+if save_data: plt.savefig(f"data/hessian_change/1-error_comparison-{b_type}.pdf", bbox_inches="tight")
 else: plt.show()
