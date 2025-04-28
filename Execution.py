@@ -18,7 +18,7 @@ save_data = False
 n = 15 # size of the unknown
 
 t_s = 0.1 # sampling time
-t_max = 500 # simulation length
+t_max = 800 # simulation length
 num_samples = int(t_max/t_s) # total number of iterations
 
 
@@ -43,7 +43,7 @@ x0 = 50*ran.normal(size=(n,1))
 
 #%% CHOOSE b_k
 
-b_type = "sine" # "ramp" "sine" "sine+ramp" "sine^2" "sine-sine" "sine^2-sine" "ramp-then-sine" "constant"
+b_type = "sine^2-ramp-mixed" # "ramp" "sine" "sine+ramp" "sine^2" "sine-sine" "sine^2-sine" "ramp-then-sine" "constant"
 A_type = "constant" # "constant" "time-varying"
 
 if b_type == "constant":
@@ -124,6 +124,79 @@ if b_type == "ramp-then-sine":
     
     coeffs_sys_2 = sine_product_z_transform(([omega1*t_s]))
     coeffs_sys = [1, -2, 1]
+
+if b_type == "sine-sine^2-mixed":
+    different_systems = False
+    omega1, omega2 = 1, 10
+    
+    n1 = (n + 1) // 2
+    n2 = n // 2
+    
+    b1 = np.sin(omega1*np.arange(0,t_max,t_s)*np.ones((n1,1)))
+    b2 = np.sin(omega2*np.arange(0,t_max,t_s)*np.ones((n2,1)))**2
+    b = np.vstack((b1,b2))
+    coeffs_sys = polynomial_product([-1, 1], [1, -2*np.cos(omega2*t_s), 1], [1, -2*np.cos(2*omega2*t_s), 1])
+
+if b_type == "sine-ramp-mixed":
+    different_systems = False
+    omega = 1
+    n1 = (n + 1) // 2
+    n2 = n // 2
+    
+    b1 = np.sin(omega*np.arange(0,t_max,t_s)*np.ones((n1,1)))
+    b_bar = 5*ran.random((n2,1)) # velocity
+    b2 = np.arange(0,t_max,t_s)*b_bar + b_bar
+    b = np.vstack((b1,b2))
+    coeffs_sys = sine_product_z_transform(([omega*t_s]))
+
+if b_type == "sine-sine+ramp-mixed":
+    different_systems = False
+    omega1, omega2 = 1, 1
+    n1 = (n + 1) // 2
+    n2 = n // 2
+    
+    b1 = np.sin(omega1*np.arange(0,t_max,t_s)*np.ones((n1,1)))
+    b2 = np.sin(omega2*np.arange(0,t_max,t_s)*np.ones((n2,1)))
+    b_bar = 5*ran.random((n2,1)) # velocity
+    b2 += np.arange(0,t_max,t_s)*b_bar
+    b = np.vstack((b1,b2))
+    coeffs_sys = sine_product_z_transform(([0, omega*t_s]))
+
+if b_type == "sine^2-ramp-mixed":
+    different_systems = False
+    omega = 10
+    n1 = (n + 1) // 2
+    n2 = n // 2
+    b1 = np.sin(omega*np.arange(0,t_max,t_s)*np.ones((n1,1)))**2
+    b_bar = 5*ran.random((n2,1)) # velocity
+    b2 = np.arange(0,t_max,t_s)*b_bar + b_bar
+    b = np.vstack((b1,b2))
+    coeffs_sys = polynomial_product([-1, 1], [1, -2*np.cos(omega*t_s), 1], [1, -2*np.cos(2*omega*t_s), 1])
+
+if b_type == "sine^2-sine+ramp-mixed":
+    different_systems = False
+    omega1, omega2 = 10, 1
+    n1 = (n + 1) // 2
+    n2 = n // 2
+    b1 = np.sin(omega1*np.arange(0,t_max,t_s)*np.ones((n1,1)))**2
+    b2 = np.sin(omega2*np.arange(0,t_max,t_s)*np.ones((n2,1)))
+    b_bar = 5*ran.random((n2,1)) # velocity
+    b2 += np.arange(0,t_max,t_s)*b_bar
+    b = np.vstack((b1,b2))
+    coeffs_sys = polynomial_product([-1, 1], [1, -2*np.cos(omega1*t_s), 1], [1, -2*np.cos(2*omega1*t_s), 1])
+
+if b_type == "ramp-sine+ramp-mixed":
+    different_systems = False
+    omega1 = 1
+    n1 = (n + 1) // 2
+    n2 = n // 2
+    b_bar = 5*ran.random((n1,1)) # velocity
+    b1 = np.arange(0,t_max,t_s)*b_bar + b_bar
+    b2 = np.sin(omega1*np.arange(0,t_max,t_s)*np.ones((n2,1)))
+    b_bar = 5*ran.random((n2,1)) # velocity
+    b2 += np.arange(0,t_max,t_s)*b_bar
+    b = np.vstack((b1,b2))
+    coeffs_sys = sine_product_z_transform(([0, omega*t_s]))
 
 # generate cost function
 b_list = [b[:,[k]] for k in range(b.shape[1])]
