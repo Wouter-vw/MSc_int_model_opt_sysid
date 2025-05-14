@@ -113,7 +113,7 @@ def online_gradient_control_sys_id_ARM(f, lambda_lims, e_threshold, e_threshold2
             x_trial[...,k] = x[...,k+1].reshape(-1)
 
             e_hat, P, e_k_RLS = RLS_func(e_hat, P, f_factor2, k, x_trial, order)
-            e_k_norm = window_error(e_hat, e_k_RLS, x_trial, k-2, order, win_size=win_size2)
+            e_k_norm = window_error(e_hat, e_k_RLS, x_trial, k-1, order, win_size=win_size2)
 
             if e_k_norm < e_k_best:
                 e_k_best = e_k_norm
@@ -149,7 +149,7 @@ def online_gradient_control_sys_id_ARM(f, lambda_lims, e_threshold, e_threshold2
             x_trial[...,k] = x[...,k+1].reshape(-1)
             
             e_hat, P, e_k_RLS = RLS_func(e_hat, P, f_factor1, k, x_trial, order)
-            e_k_norm = window_error(e_hat, e_k_RLS, x_trial, k-2, order, win_size=win_size1)
+            e_k_norm = window_error(e_hat, e_k_RLS, x_trial, k-1, order, win_size=win_size1)
             
             if e_k_norm < e_threshold:
                 e_hat_best = e_hat
