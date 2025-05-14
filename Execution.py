@@ -10,15 +10,15 @@ ran = np.random.default_rng()
 
 from tvopt import utils
 from tools import TVQuadratic, online_gradient, online_gradient_control, control_design, sine_product_z_transform, polynomial_product, convergence_rate
-from SYSID import online_gradient_control_sys_id_ARM
+from SYSID import online_gradient_control_sys_id_ARM, online_gradient_control_sys_id_known_b_k
 
 #%% SET-UP
-save_data = False
+save_data = True
 
 n = 15 # size of the unknown
 
 t_s = 0.1 # sampling time
-t_max = 800 # simulation length
+t_max = 500 # simulation length
 num_samples = int(t_max/t_s) # total number of iterations
 
 
@@ -42,8 +42,10 @@ x0 = 50*ran.normal(size=(n,1))
 
 
 #%% CHOOSE b_k
+# "ramp" "ramp" "sine" "sine+ramp" "sine^2" "sine-sine" "sine^2-sine" "ramp-then-sine" "constant"
+# "sine-sine^2-mixed" "sine-ramp-mixed" "sine-sine+ramp-mixed" "sine^2-ramp-mixed" "sine^2-sine+ramp-mixed" "ramp-sine+ramp-mixed"
 
-b_type = "sine^2-ramp-mixed" # "ramp" "sine" "sine+ramp" "sine^2" "sine-sine" "sine^2-sine" "ramp-then-sine" "constant"
+b_type = "ramp" 
 A_type = "constant" # "constant" "time-varying"
 
 if b_type == "constant":
@@ -160,7 +162,7 @@ if b_type == "sine-sine+ramp-mixed":
     b_bar = 5*ran.random((n2,1)) # velocity
     b2 += np.arange(0,t_max,t_s)*b_bar
     b = np.vstack((b1,b2))
-    coeffs_sys = sine_product_z_transform(([0, omega*t_s]))
+    coeffs_sys = sine_product_z_transform(([0, omega1*t_s]))
 
 if b_type == "sine^2-ramp-mixed":
     different_systems = False
@@ -196,7 +198,7 @@ if b_type == "ramp-sine+ramp-mixed":
     b_bar = 5*ran.random((n2,1)) # velocity
     b2 += np.arange(0,t_max,t_s)*b_bar
     b = np.vstack((b1,b2))
-    coeffs_sys = sine_product_z_transform(([0, omega*t_s]))
+    coeffs_sys = sine_product_z_transform(([0, omega1*t_s]))
 
 # generate cost function
 b_list = [b[:,[k]] for k in range(b.shape[1])]
@@ -225,12 +227,43 @@ x = online_gradient_control({"f":f, "b":coeffs_sys}, coeffs_ctrl, x_0=x0)
 error_control = [la.norm(x[...,k]-x_opt[:,[k]]) for k in range(num_samples)]
 
 
-x, test_coeffs= online_gradient_control_sys_id_ARM(f, [mu,L], e_threshold = 1e-12, e_threshold2 = 1e-12, delta = -0.13, f_factor1 = 0.1, f_factor2 = 0.1, win_size1=4, win_size2=9, step=step, x_0=0)
+print("Executing RLS with unknown order")
+x, test_coeffs= online_gradient_control_sys_id_ARM(f, [mu,L], e_threshold = 1e-5, e_threshold2 = 1e-5, delta = 0.13, f_factor1 = 0.1, f_factor2 = 0.1, win_size1=4, win_size2=9, step=step, x_0=0)
 error_control_test = [la.norm(x[...,k]-x_opt[:,[k]]) for k in range(num_samples)]
 
+if A_type == "constant":
+    #---------------------  ARM(inf) implementation  --------------------------
+    print("Executing RLS with unknown order, known b_k")
+    lambda_factor = 0.1
+
+    ### Just to show which delta which works well (This determines the growth rate of the order by log(n)^(1 + delta)###
+    if b_type == "sine+ramp":
+        delta = 0.13
+    else: 
+        delta = -0.13
+
+    x, test_coeffs, _, _, _ = online_gradient_control_sys_id_known_b_k(f, b, [mu, L], 0.13, lambda_factor, step, e_threshold=1e-09, x_0=0)
+    error_control_sys_id_ARM = [la.norm(x[...,k]-x_opt[:,[k]]) for k in range(num_samples)]
+    #-----------------------------------------------
+
+if save_data:
+    if A_type == "time-varying":
+        error_control_sys_id_ARM = 0
+    np.savez(f"data/{b_type}_{A_type}/1-tv_linear_term-{b_type}_{A_type}.npz", t_s=t_s, t_max=t_max, num_samples=num_samples,
+             n=n, mu=mu, L=L, step=step, x0=x0, b_type=b_type, A_type = A_type,
+             coeffs_sys=coeffs_sys, error_gradient=error_gradient, error_control=error_control, 
+             error_control_test = error_control_test,error_control_sys_id_ARM = error_control_sys_id_ARM, allow_pickle=True)
 
 markevery = 1
 fontsize = 16
+# ------ asymptotic error ------
+# computed as the maximum tracking error in the last 4/5ths of the simulation
+tt = int(4*num_samples/5)
+# computed as the maximum tracking error in the last 4/5ths of the simulation
+if A_type == "constant":
+    asymp_errors = f"Asymptotic Tracking Errors: \nOnline Gradient Method: {np.max(error_gradient[tt:]):.3e} \nOriginal Control Method: {np.max(error_control[tt:]):.3e} \nUnknown b_k: {np.max(error_control_test[tt:]):.3e} \nKnown b_k: {np.max(error_control_sys_id_ARM[tt:]):.3e}" 
+else: 
+    asymp_errors = f"Asymptotic Tracking Errors: \nOnline Gradient Method: {np.max(error_gradient[tt:]):.3e} \nOriginal Control Method: {np.max(error_control[tt:]):.3e} \nUnknown b_k: {np.max(error_control_test[tt:]):.3e}" 
 
 t = np.arange(0,t_max,t_s)
 
@@ -242,9 +275,8 @@ plt.semilogy(t, error_control_test, label="Control-based Sys ID ARX")
 
 plt.semilogy(t, error_control, label="Control-based Baseline")
 
-# ------ asymptotic error ------
-# computed as the maximum tracking error in the last 4/5ths of the simulation
-tt = int(4*num_samples/5)
+if A_type == "constant":
+    plt.semilogy(t, error_control_sys_id_ARM, label="Known b_k version")
 
 plt.xlabel("Time", fontsize=fontsize)
 plt.ylabel("Tracking error", fontsize=fontsize)
@@ -252,3 +284,5 @@ plt.legend(fontsize=fontsize-2)
 plt.title(rf"Online Optimization with $\boldsymbol{{b}}_{{k}}$ = {b_type} and {A_type} Hessian")
 plt.savefig(f"data/{b_type}_{A_type}/1-error_comparison-{b_type}_{A_type}.pdf", bbox_inches="tight")
 plt.show()
+
+print(asymp_errors)
