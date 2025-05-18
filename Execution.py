@@ -45,8 +45,8 @@ x0 = 50*ran.normal(size=(n,1))
 # "ramp" "ramp" "sine" "sine+ramp" "sine^2" "sine-sine" "sine^2-sine" "ramp-then-sine" "constant"
 # "sine-sine^2-mixed" "sine-ramp-mixed" "sine-sine+ramp-mixed" "sine^2-ramp-mixed" "sine^2-sine+ramp-mixed" "ramp-sine+ramp-mixed"
 
-b_type = "ramp" 
-A_type = "constant" # "constant" "time-varying"
+b_type = "constant" 
+A_type = "time-varying" # "constant" "time-varying"
 
 if b_type == "constant":
     different_systems = False
@@ -228,7 +228,7 @@ error_control = [la.norm(x[...,k]-x_opt[:,[k]]) for k in range(num_samples)]
 
 
 print("Executing RLS with unknown order")
-x, test_coeffs= online_gradient_control_sys_id_ARM(f, [mu,L], e_threshold = 1e-5, e_threshold2 = 1e-5, delta = 0.13, f_factor1 = 0.1, f_factor2 = 0.1, win_size1=4, win_size2=9, step=step, x_0=0)
+x, test_coeffs= online_gradient_control_sys_id_ARM(f, [mu,L], e_threshold = 1e-6, e_threshold2 = 1e-6, delta = -0.13, f_factor1 = 0.1, f_factor2 = 0.1, win_size1=4, win_size2=9, step=step, x_0=0)
 error_control_test = [la.norm(x[...,k]-x_opt[:,[k]]) for k in range(num_samples)]
 
 if A_type == "constant":
