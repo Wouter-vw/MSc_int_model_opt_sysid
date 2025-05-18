@@ -21,24 +21,26 @@ def plot_error_comparison_unknown_b_k(b_type, A_type, save_fig=True):
     t = np.arange(0,t_max,t_s)
     # Plot
     plt.figure()
-    plt.semilogy(t, error_gradient, label="Online gradient")
-    plt.semilogy(t, error_control_test, label="Control-based Sys ID ARX")
-    plt.semilogy(t, error_control, label="Control-based Baseline")
-
+    plt.semilogy(t, error_gradient, label="OGD")
+    plt.semilogy(t, error_control, label="Control-based [1]", color='tab:orange')
     if A_type == "constant":
-        plt.semilogy(t, error_control_sys_id_ARM, label="Known b_k version")
+        plt.semilogy(t, error_control_sys_id_ARM, label="SIMBO-A", color = 'tab:red')
+    plt.semilogy(t, error_control_test, label="SIMBO-B", color = 'tab:purple')
 
     plt.xlabel("Time")
     plt.ylabel("Tracking error")
     plt.legend()
-    plt.title(rf"Online Optimization with $\boldsymbol{{b}}_{{k}}$ = {b_type} and {A_type} Hessian")
+    if A_type == "constant":
+        plt.title(rf"Online Optimization with $\boldsymbol{{b}}_{{k}}$ = {b_type}")
+    else:
+        plt.title(rf"Online Optimization with $\boldsymbol{{b}}_{{k}}$ = {b_type} and {A_type} Hessian")
 
     # Save if requested
     if save_fig:
         save_path = f"data/{b_type}_{A_type}/1-error_comparison-{b_type}_{A_type}.pdf"
         plt.savefig(save_path, bbox_inches="tight")
-
-    plt.show()
+    plt.close()
+    #plt.show()
 
 
 def plot_error_comparison_known_b_k(b_type, save_fig):
@@ -55,11 +57,11 @@ def plot_error_comparison_known_b_k(b_type, save_fig):
     # Plot
     plt.figure()
 
-    plt.semilogy(t, error_gradient, label="Online gradient")
+    plt.semilogy(t, error_gradient, label="OGD")
 
-    plt.semilogy(t, error_control, label="Control-based")
-    plt.semilogy(t[1:], error_control_sys_id[1:], label="Control_with_sysID")
-    plt.semilogy(t[1:], error_control_sys_id_ARM[1:], label="Control_with_sysID_ARM")
+    plt.semilogy(t, error_control, label="Control-based [1]", color = 'tab:orange')
+    plt.semilogy(t[1:], error_control_sys_id[1:], label="SIMBO-A Adapted", color = 'tab:green')
+    plt.semilogy(t[1:], error_control_sys_id_ARM[1:], label="SIMBO-A", color = 'tab:red')
 
     plt.xlabel("Time")
     plt.ylabel("Tracking error")
@@ -70,7 +72,8 @@ def plot_error_comparison_known_b_k(b_type, save_fig):
     if save_fig:
         save_path = f"Known_b_k/data/{b_type}/1-tv_linear_term-{b_type}.pdf"
         plt.savefig(save_path, bbox_inches="tight")
-    plt.show()
+    plt.close()
+    #plt.show()
 
 
 ## Function to calculate our delta error (Described in the paper for inexact model limit)
@@ -134,23 +137,25 @@ def plot_error_comparison_RLS(b_type, xrange, save_fig):
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(12, 6))
 
     # Top subplot (RLS-related plots)
-    ax1.semilogy(dif_list[:xrange], label='True Error RLS')
-    ax1.semilogy(norm_list_RLS[:xrange], label='Computed Error Norm RLS')
+    ax1.semilogy(dif_list[:xrange], label='$||\delta||_1$ Error', color = 'tab:orange')
+    ax1.semilogy(norm_list_RLS[:xrange], label='RLS Computed Error', color = 'tab:green')
     ax1.set_ylabel(r'$\||(\cdot)||_\infty$')
-    ax1.set_title('RLS: True Error and Computed Error')
-    ax1.scatter(used_index_RLS, used_rls, color='red', label='Controller Computed ARM$(\infty)$')
+    ax1.set_title('SIMBO-A Adapted: True Error and Computed Error')
+    ax1.scatter(used_index_RLS, used_rls, color='black', label='Controller Coeff. Computed$')
     ax1.grid(True)
     ax1.legend()
 
     # Bottom subplot (ARM-related plots)
-    ax2.semilogy(dif_list_arm[:xrange], label='True Error ARM$(\infty)$')
-    ax2.semilogy(norm_list_ARM[:xrange], label='Computed Error Norm ARM$(\infty)$')
+    ax2.semilogy(dif_list_arm[:xrange], label='$||\delta||_1$ Error', color = 'tab:orange')
+    ax2.semilogy(norm_list_ARM[:xrange], label='RLS Computed Error', color = 'tab:red')
+    ax1.set_ylabel(r'$\||(\cdot)||_\infty$')
     ax2.set_xlabel('Timestep')
-    ax2.set_title('ARM$(\infty)$: True Error and Computed Error')
-    ax2.scatter(used_index_ARM, used_arm, color='red', label='Controller Computed ARM$(\infty)$')
-    
+    ax2.set_title('SIMBO-A: True Error and Computed Error')
+    ax2.scatter(used_index_ARM, used_arm, color='black', label='Controller Coeff. Computed')
     ax2.grid(True)
     ax2.legend()
+
     plt.tight_layout()
     if save_fig: plt.savefig(f"Known_b_k/data/{b_type}/1-norm_error_comp-{b_type}.pdf", bbox_inches="tight")
-    plt.show()
+    plt.close()
+    #plt.show()
