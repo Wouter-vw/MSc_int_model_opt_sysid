@@ -2,9 +2,10 @@ import numpy as np
 from numpy import linalg as la
 from tvopt import utils
 import matplotlib.pyplot as plt
-from projected_funs import use_case, projected_online_gradient, projected_online_gradient_control_sys_id_ARM, anti_windup_projected_online_gradient_control, projection, projected_online_gradient_control, check_constraints
+from projected_funs import projected_online_gradient, projected_online_gradient_control_sys_id_ARM, anti_windup_projected_online_gradient_control, projection, projected_online_gradient_control, check_constraints
 from SYSID import online_gradient_control_sys_id_ARM, control_design
 from tools import online_gradient, online_gradient_control
+from alternate_funcs import use_case_tester
 import cvxpy as cp
 
 
@@ -29,7 +30,6 @@ Q, _ = np.linalg.qr(np.random.randn(6, 2))
 G = (np.sqrt(eigvals)[:, None] * Q.T)
 
 beta = 1
-A = G.T @ G 
 w = np.sin(0.005*np.arange(0,t_max,t_s)*np.ones((w_size,1))) + np.ones((w_size,1))*2
 
 L, mu = 5, 4
@@ -41,9 +41,6 @@ t2 = np.arange(t_max / 2, t_max, t_s)
 y1 = np.hstack((np.interp(t1, [t1[0], t1[-1]], [23, 39]).reshape(-1, 1), np.interp(t1, [t1[0], t1[-1]], [50, 30]).reshape(-1, 1)))
 y2 = np.hstack((np.interp(t2, [t2[0], t2[-1]], [39, 26]).reshape(-1, 1), np.interp(t2, [t2[0], t2[-1]], [30, 33]).reshape(-1, 1)))
 y_ref = np.vstack((y1, y2)).T
-
-c = [np.linalg.norm(H @ w[:,k] - y_ref[:,k])**2 for k in range(w.shape[1])]
-b_list = [(G.T @ (H @ w[:,k] - y_ref[:,k])).reshape((DERs,1)) for k in range(w.shape[1])]
 
 # Compute list_h, first_entries, and second_entries
 list_h = [H @ w[:, k] for k in range(w.shape[1])]
@@ -75,25 +72,25 @@ fig.supxlabel("Time (sec.)")
 fig.supylabel("Power (kW)")
 
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Make room for shared label
-fig.savefig("Digital_Futures/data/pcc_comparison.pdf", format="pdf")
+fig.savefig("Digital_Futures/data/method2/pcc_comparison.pdf", format="pdf")
 
-b_opt = np.stack(b_list)
-b_opt = b_opt.reshape(8640, 6).T
-f = use_case(A, b_list, c, beta = 1, t_s=t_s)
+f = use_case_tester(G, H, w, y_ref, beta = 1, t_s=t_s)
 
-# Store optimal x for each time step
 x_opt_all = []
 
 for k in range(num_samples):
-    A_k = f.A[k]
-    b_k = f.b[k]
-    c_k = f.c[k]
+    # Precompute constants at time k
+    w_k = f.w[:,k].reshape(2,1)
+    y_ref_k = f.y_ref[:,k].reshape(2,1)
+    G = f.G
+    H = f.H
+    beta = f.beta
 
     # Variables
     x = cp.Variable(DERs)
     z = cp.Variable(DERs, boolean=True)
 
-    # Build disjoint constraints (same as before)
+    # Disjoint interval constraints (same as before)
     constraints = []
     intervals = [
         ([-10, -6], [6, 10]),
@@ -111,17 +108,21 @@ for k in range(num_samples):
                 x[j] <= b1 * (1 - z[j]) + b2 * z[j]
             ]
 
-    # Objective at time step k
-    objective = cp.Minimize(0.5 * cp.quad_form(x, A_k) + b_k.T @ x + 0.5 * c_k)
+    # Compute y = Gx + Hw
+    y = G @ x + H @ w_k
+
+    # Objective: 0.5 * beta * || y - y_ref ||^2
+    diff = y - y_ref_k
+    objective = cp.Minimize(0.5 * beta * cp.sum_squares(diff))
 
     # Solve
     prob = cp.Problem(objective, constraints)
-    prob.solve(solver=cp.ECOS_BB)  # or use ECOS_BB if needed
+    prob.solve(solver=cp.ECOS_BB)
 
     # Store solution
     x_opt_all.append(x.value)
 
-# Stack solutions horizontally (each column = x_k)
+# Reshape result
 x_opt = np.hstack(x_opt_all)
 x_opt1 = x_opt.reshape(num_samples, 6).T.reshape(6, 1, num_samples)
 
@@ -205,7 +206,7 @@ plt.ylabel("Tracking error", fontsize=fontsize)
 plt.legend(fontsize=fontsize-2)
 plt.title(rf"Online Optimization Compared to Constrained Optimum")
 plt.tight_layout()
-plt.savefig("Digital_Futures/data/tracking_error_plot.pdf")
+plt.savefig("Digital_Futures/data/method2/tracking_error_plot.pdf")
 plt.show()
 
 t = np.arange(0,t_max,t_s)
@@ -224,11 +225,11 @@ plt.ylabel("Cumulative Tracking error", fontsize=fontsize)
 plt.legend(fontsize=fontsize-2)
 plt.title(rf"Online Optimization Compared to Constrained Optimum")
 plt.tight_layout()
-plt.savefig("Digital_Futures/data/cumulative_tracking_error_plot.pdf")
+plt.savefig("Digital_Futures/data/method2/cumulative_tracking_error_plot.pdf")
 plt.show()
 
 if save_data == True:
-    np.savez("Digital_Futures/data/tracking_error_data.npz",
+    np.savez("Digital_Futures/data/method2/tracking_error_data.npz",
             t=t,
             t_max=t_max,
             t_s=t_s,
